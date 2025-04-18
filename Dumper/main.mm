@@ -3,6 +3,8 @@
 #include <chrono>
 #include <fstream>
 #include <thread>
+#include <chrono>
+#include <format>
 
 #include "Generators/CppGenerator.h"
 #include "Generators/MappingGenerator.h"
@@ -11,9 +13,23 @@
 
 #include "Generators/Generator.h"
 
+#import <Foundation/Foundation.h>
+
+
+template<typename... Args>
+inline void LogMsg(const std::string& Fmt, Args&&... args)
+{
+    std::string formatted = std::format(Fmt, std::forward<Args>(args)...);
+    NSLog(@"%s", formatted.c_str());
+}
+
+
+using namespace std::chrono_literals;
 
 void MainThread(void)
 {
+    std::this_thread::sleep_for(15s);
+    
 	auto t_1 = std::chrono::high_resolution_clock::now();
 
 	std::cout << "Started Generation [Dumper-7]!\n";
@@ -37,8 +53,9 @@ void MainThread(void)
 		Settings::Generator::GameVersion = Version.ToString();
 	}
 
-	std::cout << "GameName: " << Settings::Generator::GameName << "\n";
-	std::cout << "GameVersion: " << Settings::Generator::GameVersion << "\n\n";
+    LogMsg("GameName: {}\n", Settings::Generator::GameName);
+    LogMsg("GameVersion: {}\n\n", Settings::Generator::GameVersion);
+
 
 	Generator::Generate<CppGenerator>();
 	Generator::Generate<MappingGenerator>();
@@ -51,7 +68,7 @@ void MainThread(void)
 	auto ms_int_ = std::chrono::duration_cast<std::chrono::milliseconds>(t_C - t_1);
 	std::chrono::duration<double, std::milli> ms_double_ = t_C - t_1;
 
-	std::cout << "\n\nGenerating SDK took (" << ms_double_.count() << "ms)\n\n\n";
+    LogMsg("\n\nGenerating SDK took ({})ms)\n\n\n", ms_double_.count());
 }
 
 __attribute__((constructor))

@@ -214,11 +214,14 @@ namespace UC
 	class TArray
 	{
 	private:
-		template<typename ArrayElementType>
+		template<typename >
 		friend class TAllocatedArray;
 
 		template<typename SparseArrayElementType>
 		friend class TSparseArray;
+        
+        template<typename SparseArrayElementType>
+        friend class FString;
 
 	protected:
 		static constexpr uint64 ElementAlign = alignof(ArrayElementType);

@@ -25,7 +25,7 @@ std::string FNameEntry::GetString()
 	if (!Address)
 		return "";
 
-	return UtfN::WStringToString(GetWString());
+    return std::string(GetWString().begin(), GetWString().end());
 }
 
 void* FNameEntry::GetAddress()
