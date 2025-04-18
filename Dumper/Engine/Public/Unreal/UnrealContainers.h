@@ -219,9 +219,6 @@ namespace UC
 
 		template<typename SparseArrayElementType>
 		friend class TSparseArray;
-        
-        template<typename SparseArrayElementType>
-        friend class FString;
 
 	protected:
 		static constexpr uint64 ElementAlign = alignof(ArrayElementType);

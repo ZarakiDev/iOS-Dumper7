@@ -32,7 +32,7 @@ void MainThread(void)
     
 	auto t_1 = std::chrono::high_resolution_clock::now();
 
-	std::cout << "Started Generation [Dumper-7]!\n";
+	LogMsg("Started Generation [Dumper-7]!\n");
 
 	Generator::InitEngineCore();
 	Generator::InitInternal();
