@@ -134,12 +134,12 @@ void Off::InSDK::Text::InitTextOffsets()
 
 	/* Allocate and zero-initialize ParamStruct */
 #pragma warning(disable: 6255)
-	uint8_t* ParamPtr = static_cast<uint8_t*>(alloca(ParamSize));
+	uint8_t* ParamPtr = static_cast<uint8_t*>(__builtin_alloca(ParamSize));
 	memset(ParamPtr, 0, ParamSize);
 
 	/* Choose a, fairly random, string to later search for in FTextData */
-	constexpr const TChar* StringText = TEXT("ThisIsAGoodString!");
-	constexpr int32 StringLength = (sizeof(TEXT("ThisIsAGoodString!")) / sizeof(TChar));
+	constexpr const TCHAR* StringText = TEXT("ThisIsAGoodString!");
+	constexpr int32 StringLength = (sizeof(TEXT("ThisIsAGoodString!")) / sizeof(TCHAR));
 	constexpr int32 StringLengthBytes = (sizeof(TEXT("ThisIsAGoodString!")));
 
 	/* Initialize 'InString' in the ParamStruct */
@@ -176,7 +176,7 @@ void Off::InSDK::Text::InitTextOffsets()
 	/* Search for a pointer pointing to a int32 Value (FString::NumElements) equal to StringLength */
 	for (int32 i = StartOffset; i < MaxOffset; i += sizeof(int32))
 	{
-		TChar* PosibleStringPtr = *reinterpret_cast<TChar**>((FTextDataPtr + i) - 0x8);
+		TCHAR* PosibleStringPtr = *reinterpret_cast<TCHAR**>((FTextDataPtr + i) - 0x8);
 		const int32 PossibleLength = *reinterpret_cast<int32*>(FTextDataPtr + i);
 
 		/* Check if our length matches and see if the data before the length is a pointer to our StringText */

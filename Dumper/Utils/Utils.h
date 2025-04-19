@@ -5,7 +5,9 @@
 #include <string>
 #include <algorithm>
 #include <functional>
-
+#include <mach/mach.h>
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
 
 /* Credits: https://en.cppreference.com/w/cpp/string/byte/tolower */
 inline std::string str_tolower(std::string S)
@@ -21,6 +23,10 @@ inline int32_t StrlenHelper(const CharType* Str)
 	{
 		return strlen(Str);
 	}
+    else if constexpr (std::is_same<CharType, char16_t>())
+    {
+        return std::char_traits<char16_t>::length(Str);
+    }
 	else
 	{
 		return wcslen(Str);
@@ -34,6 +40,10 @@ inline bool StrnCmpHelper(const CharType* Left, const CharType* Right, size_t Nu
 	{
 		return strncmp(Left, Right, NumCharsToCompare) == 0;
 	}
+    else if constexpr (std::is_same<CharType, char16_t>())
+    {
+        return std::char_traits<char16_t>::compare(Left, Right, NumCharsToCompare) == 1;
+    }
 	else
 	{
 		return wcsncmp(Left, Right, NumCharsToCompare) == 0;
@@ -42,215 +52,210 @@ inline bool StrnCmpHelper(const CharType* Left, const CharType* Right, size_t Nu
 
 namespace ASMUtils
 {
-	/* See IDA or https://c9x.me/x86/html/file_module_x86_id_147.html for reference on the jmp opcode */
-	inline bool Is32BitRIPRelativeJump(uintptr_t Address)
-	{
-		return Address && *reinterpret_cast<uint8_t*>(Address) == 0xE9; /* 48 for jmp, FF for "RIP relative" -- little endian */
-	}
+    // Check if the instruction is a B/BL/B.cond (i.e., relative branch)
+    inline bool IsBranchInstruction(uint32_t instruction)
+    {
+        // Check top 6 bits for 0b000101 (B) or 0b100101 (BL)
+        return (instruction & 0xFC000000) == 0x14000000 || (instruction & 0xFC000000) == 0x94000000;
+    }
 
-	inline uintptr_t Resolve32BitRIPRelativeJumpTarget(uintptr_t Address)
-	{
-		constexpr int32_t InstructionSizeBytes = 0x5;
-		constexpr int32_t InstructionImmediateDisplacementOffset = 0x1;
+    // Resolves a 26-bit immediate branch (B/BL) to its absolute address
+    inline uintptr_t ResolveBranchTarget(uintptr_t Address)
+    {
+        uint32_t instr = *reinterpret_cast<uint32_t*>(Address);
 
-		const int32_t Offset = *reinterpret_cast<int32_t*>(Address + InstructionImmediateDisplacementOffset);
+        // Instruction format: B/BL <label>
+        // Offset is bits[25:0] << 2 (sign-extended)
+        int32_t imm26 = (instr & 0x03FFFFFF);
+        int64_t offset = (int64_t)(imm26 << 6) >> 4; // sign extend to 64 bits
 
-		/* Add the InstructionSizeBytes because offsets are relative to the next instruction. */
-		return Address + InstructionSizeBytes + Offset;
-	}
+        return Address + offset;
+    }
 
-	/* See https://c9x.me/x86/html/file_module_x86_id_147.html */
-	inline uintptr_t Resolve32BitRegisterRelativeJump(uintptr_t Address)
-	{
-		/*
-		* 48 FF 25 C1 10 06 00     jmp QWORD [rip+0x610c1]
-		*
-		* 48 FF 25 <-- Information on the instruction [jump, relative, rip]
-		* C1 10 06 00 <-- 32-bit Offset relative to the address coming **after** these instructions (+ 7) [if 48 had hte address 0x0 the offset would be relative to address 0x7]
-		*/
+    // Check for ADRP (used for PC-relative loads to registers)
+    inline bool IsADRP(uint32_t instruction)
+    {
+        return (instruction & 0x9F000000) == 0x90000000;
+    }
 
-		return ((Address + 7) + *reinterpret_cast<int32_t*>(Address + 3));
-	}
+    // Resolves target of an ADRP instruction
+    inline uintptr_t ResolveADRP(uintptr_t Address)
+    {
+        uint32_t instr = *reinterpret_cast<uint32_t*>(Address);
+        uint64_t pc_page = Address & ~0xFFFULL;
 
-	inline uintptr_t Resolve32BitSectionRelativeCall(uintptr_t Address)
-	{
-		/* Same as in Resolve32BitRIPRelativeJump, but instead of a jump we resolve a call, with one less instruction byte */
-		return ((Address + 6) + *reinterpret_cast<int32_t*>(Address + 2));
-	}
+        // Extract immhi and immlo
+        uint64_t immhi = (instr >> 5) & 0x7FFFF;
+        uint64_t immlo = (instr >> 29) & 0x3;
 
-	inline uintptr_t Resolve32BitRelativeCall(uintptr_t Address)
-	{
-		/* Same as in Resolve32BitRIPRelativeJump, but instead of a jump we resolve a non-relative call, with two less instruction byte */
-		return ((Address + 5) + *reinterpret_cast<int32_t*>(Address + 1));
-	}
+        // Sign-extend 21-bit immediate
+        int64_t imm = ((int64_t)((immhi << 2) | immlo) << 43) >> 31;
 
-	inline uintptr_t Resolve32BitRelativeMove(uintptr_t Address)
-	{
-		/* Same as in Resolve32BitRIPRelativeJump, but instead of a jump we resolve a relative mov */
-		return ((Address + 7) + *reinterpret_cast<int32_t*>(Address + 3));
-	}
+        return pc_page + imm;
+    }
 
-	inline uintptr_t Resolve32BitRelativeLea(uintptr_t Address)
-	{
-		/* Same as in Resolve32BitRIPRelativeJump, but instead of a jump we resolve a relative lea */
-		return ((Address + 7) + *reinterpret_cast<int32_t*>(Address + 3));
-	}
+    // Check for LDR literal (PC-relative loads)
+    inline bool IsLDRLiteral(uint32_t instruction)
+    {
+        // LDR (literal) has opcode 0b0001xx (depending on size)
+        return (instruction & 0x3B000000) == 0x18000000;
+    }
+
+    // Resolves the target of a PC-relative LDR instruction
+    inline uintptr_t ResolveLDRLiteral(uintptr_t Address)
+    {
+        uint32_t instr = *reinterpret_cast<uint32_t*>(Address);
+
+        // 19-bit signed offset, shifted by scale (size)
+        int32_t imm19 = (instr >> 5) & 0x7FFFF;
+        int32_t offset = (imm19 << 13) >> 11; // sign-extend
+
+        return Address + offset;
+    }
+
+    inline bool IsADRL(uint32_t* address)
+    {
+        uint32_t adrp = address[0];
+        uint32_t add  = address[1];
+
+        bool isAdrp = (adrp & 0x9F000000) == 0x90000000; // ADRP opcode
+        bool isAdd  = (add  & 0xFFC00000) == 0x91000000; // ADD (immediate)
+
+        uint32_t adrpReg = adrp & 0x1F;          // destination register of ADRP
+        uint32_t addBase = (add >> 5) & 0x1F;    // base register of ADD
+        uint32_t addDest = add & 0x1F;           // destination register of ADD
+
+        return isAdrp && isAdd && (adrpReg == addBase) && (addDest == adrpReg);
+    }
+
+    inline uintptr_t ResolveADRL(uintptr_t address)
+    {
+        uint32_t* instrs = reinterpret_cast<uint32_t*>(address);
+
+        uint32_t adrp = instrs[0];
+        uint32_t add  = instrs[1];
+
+        // Resolve ADRP
+        uint64_t pc_page = address & ~0xFFFULL;
+        uint64_t immhi = (adrp >> 5) & 0x7FFFF;
+        uint64_t immlo = (adrp >> 29) & 0x3;
+        int64_t adrpImm = ((int64_t)((immhi << 2) | immlo) << 43) >> 31;
+
+        uintptr_t adrpResult = pc_page + adrpImm;
+
+        // Resolve ADD immediate
+        uint32_t imm12 = (add >> 10) & 0xFFF;
+        uint32_t shift = (add >> 22) & 0x1; // If set, shift imm12 by 12
+
+        uintptr_t addResult = adrpResult + (imm12 << (shift ? 12 : 0));
+
+        return addResult;
+    }
+
+    inline bool IsSTR(uint32_t instruction)
+    {
+        return (instruction & 0x3B000000) == 0x39000000;
+    }
+
+    inline uintptr_t ResolveSTR(uintptr_t address)
+    {
+        uint32_t instr = *reinterpret_cast<uint32_t*>(address);
+
+        uint32_t baseReg = (instr >> 5) & 0x1F;
+        uint32_t imm12   = (instr >> 10) & 0xFFF;
+        uint32_t size    = (instr >> 30) & 0x3; // 00=8bit, 01=16bit, 10=32bit, 11=64bit
+        uint32_t scale   = size; // scale is log2 of size in bytes
+
+        // You need the actual value of the base register at runtime to resolve this!
+        // For now, we can only say: offset = base + (imm12 << scale)
+        uintptr_t offset = (imm12 << scale);
+        return /* base value */ + offset;
+    }
+
+
 }
 
-
-struct CLIENT_ID
-{
-	HANDLE UniqueProcess;
-	HANDLE UniqueThread;
-};
-
-struct TEB
-{
-	NT_TIB NtTib;
-	PVOID EnvironmentPointer;
-	CLIENT_ID ClientId;
-	PVOID ActiveRpcHandle;
-	PVOID ThreadLocalStoragePointer;
-	struct PEB* ProcessEnvironmentBlock;
-};
-
-struct PEB_LDR_DATA
-{
-	ULONG Length;
-	BOOLEAN Initialized;
-	BYTE MoreFunnyPadding[0x3];
-	HANDLE SsHandle;
-	LIST_ENTRY InLoadOrderModuleList;
-	LIST_ENTRY InMemoryOrderModuleList;
-	LIST_ENTRY InInitializationOrderModuleList;
-	PVOID EntryInProgress;
-	BOOLEAN ShutdownInProgress;
-	BYTE MoreFunnyPadding2[0x7];
-	HANDLE ShutdownThreadId;
-};
-
-struct PEB
-{
-	BOOLEAN InheritedAddressSpace;
-	BOOLEAN ReadImageFileExecOptions;
-	BOOLEAN BeingDebugged;
-	union
-	{
-		BOOLEAN BitField;
-		struct
-		{
-			BOOLEAN ImageUsesLargePages : 1;
-			BOOLEAN IsProtectedProcess : 1;
-			BOOLEAN IsImageDynamicallyRelocated : 1;
-			BOOLEAN SkipPatchingUser32Forwarders : 1;
-			BOOLEAN IsPackagedProcess : 1;
-			BOOLEAN IsAppContainer : 1;
-			BOOLEAN IsProtectedProcessLight : 1;
-			BOOLEAN SpareBits : 1;
-		};
-	};
-	BYTE ManuallyAddedPaddingCauseTheCompilerIsStupid[0x4]; // It doesn't 0x8 byte align the pointers properly 
-	HANDLE Mutant;
-	PVOID ImageBaseAddress;
-	PEB_LDR_DATA* Ldr;
-};
-
-struct UNICODE_STRING
-{
-	USHORT Length;
-	USHORT MaximumLength;
-	BYTE MoreStupidCompilerPaddingYay[0x4];
-	PWCH Buffer;
-};
-
-struct LDR_DATA_TABLE_ENTRY
-{
-	LIST_ENTRY InLoadOrderLinks;
-	LIST_ENTRY InMemoryOrderLinks;
-	//union
-	//{
-	//	LIST_ENTRY InInitializationOrderLinks;
-	//	LIST_ENTRY InProgressLinks;
-	//};
-	PVOID DllBase;
-	PVOID EntryPoint;
-	ULONG SizeOfImage;
-	BYTE MoreStupidCompilerPaddingYay[0x4];
-	UNICODE_STRING FullDllName;
-	UNICODE_STRING BaseDllName;
-}; 
-
-inline _TEB* _NtCurrentTeb()
-{
-	return reinterpret_cast<struct _TEB*>(__readgsqword(((LONG)__builtin_offsetof(NT_TIB, Self))));
-}
-
-inline PEB* GetPEB()
-{
-	return reinterpret_cast<TEB*>(_NtCurrentTeb())->ProcessEnvironmentBlock;
-}
-
-inline LDR_DATA_TABLE_ENTRY* GetModuleLdrTableEntry(const char* SearchModuleName)
-{
-	PEB* Peb = GetPEB();
-	PEB_LDR_DATA* Ldr = Peb->Ldr;
-
-	int NumEntriesLeft = Ldr->Length;
-
-	for (LIST_ENTRY* P = Ldr->InMemoryOrderModuleList.Flink; P && NumEntriesLeft-- > 0; P = P->Flink)
-	{
-		LDR_DATA_TABLE_ENTRY* Entry = reinterpret_cast<LDR_DATA_TABLE_ENTRY*>(P);
-
-		UnrealString WideModuleName(Entry->BaseDllName.Buffer, Entry->BaseDllName.Length >> 1);
-		std::string ModuleName = std::string(WideModuleName.begin(), WideModuleName.end());
-
-		if (str_tolower(ModuleName) == str_tolower(SearchModuleName))
-			return Entry;
-	}
-
-	return nullptr;
-}
 
 inline uintptr_t GetModuleBase(const char* const ModuleName = nullptr)
 {
 	if (ModuleName == nullptr)
-		return reinterpret_cast<uintptr_t>(GetPEB()->ImageBaseAddress);
+		return (uintptr_t)_dyld_get_image_header(0);
 
-	return reinterpret_cast<uintptr_t>(GetModuleLdrTableEntry(ModuleName)->DllBase);
+    for (uint32_t Idx = 0; Idx < _dyld_image_count(); ++Idx)
+    {
+        const char* dyld_name = _dyld_get_image_name(Idx);
+        if (strstr(dyld_name, ModuleName))
+        {
+            return (uintptr_t)_dyld_get_image_header(Idx);
+        }
+    }
+    return 0;
 }
+
 
 inline std::pair<uintptr_t, uintptr_t> GetImageBaseAndSize(const char* const ModuleName = nullptr)
 {
-	uintptr_t ImageBase = GetModuleBase(ModuleName);
-	PIMAGE_NT_HEADERS NtHeader = reinterpret_cast<PIMAGE_NT_HEADERS>(ImageBase + reinterpret_cast<PIMAGE_DOS_HEADER>(ImageBase)->e_lfanew);
+    for (uint32_t i = 0; i < _dyld_image_count(); ++i)
+    {
+        const char* name = _dyld_get_image_name(i);
+        if (!ModuleName || strstr(name, ModuleName))
+        {
+            const mach_header* header = _dyld_get_image_header(i);
+            uintptr_t base = reinterpret_cast<uintptr_t>(header) + _dyld_get_image_vmaddr_slide(i);
+            
+            const load_command* cmd = reinterpret_cast<const load_command*>(header + 1);
+            uintptr_t max_addr = base;
 
-	return { ImageBase, NtHeader->OptionalHeader.SizeOfImage };
+            for (uint32_t j = 0; j < header->ncmds; ++j)
+            {
+                if (cmd->cmd == LC_SEGMENT_64)
+                {
+                    auto seg = reinterpret_cast<const segment_command_64*>(cmd);
+                    uintptr_t end = base + seg->vmaddr + seg->vmsize;
+                    if (end > max_addr)
+                        max_addr = end;
+                }
+                cmd = reinterpret_cast<const load_command*>((uintptr_t)cmd + cmd->cmdsize);
+            }
+            return { base, max_addr - base };
+        }
+    }
+    return { 0, 0 };
 }
 
-/* Returns the base address of th section and it's size */
-inline std::pair<uintptr_t, DWORD> GetSectionByName(uintptr_t ImageBase, const std::string& ReqestedSectionName)
+
+std::pair<uintptr_t, size_t> GetSectionByName(const char* SegmentName, const char* SectionName, const char* ModuleName = nullptr)
 {
-	if (ImageBase == 0)
-		return { NULL, 0 };
+    for (uint32_t i = 0; i < _dyld_image_count(); ++i)
+    {
+        const char* name = _dyld_get_image_name(i);
+        if (!ModuleName || strstr(name, ModuleName))
+        {
+            const mach_header_64* header = (const mach_header_64*)_dyld_get_image_header(i);
+            uintptr_t slide = _dyld_get_image_vmaddr_slide(i);
+            const load_command* cmd = (const load_command*)(header + 1);
 
-	const PIMAGE_DOS_HEADER DosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(ImageBase);
-	const PIMAGE_NT_HEADERS NtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(ImageBase + DosHeader->e_lfanew);
-
-	PIMAGE_SECTION_HEADER Sections = IMAGE_FIRST_SECTION(NtHeaders);
-
-	DWORD TextSize = 0;
-
-	for (int i = 0; i < NtHeaders->FileHeader.NumberOfSections; i++)
-	{
-		IMAGE_SECTION_HEADER& CurrentSection = Sections[i];
-
-		std::string SectionName = reinterpret_cast<const char*>(CurrentSection.Name);
-
-		if (SectionName == ReqestedSectionName)
-			return { (ImageBase + CurrentSection.VirtualAddress), CurrentSection.Misc.VirtualSize };
-	}
-
-	return { NULL, 0 };
+            for (uint32_t j = 0; j < header->ncmds; ++j)
+            {
+                if (cmd->cmd == LC_SEGMENT_64)
+                {
+                    const segment_command_64* seg = (const segment_command_64*)cmd;
+                    if (strcmp(seg->segname, SegmentName) == 0)
+                    {
+                        const section_64* sec = (const section_64*)((uintptr_t)seg + sizeof(segment_command_64));
+                        for (uint32_t k = 0; k < seg->nsects; ++k)
+                        {
+                            if (strcmp(sec->sectname, SectionName) == 0)
+                                return { slide + sec->addr, sec->size };
+                            sec++;
+                        }
+                    }
+                }
+                cmd = (const load_command*)((uintptr_t)cmd + cmd->cmdsize);
+            }
+        }
+    }
+    return { 0, 0 };
 }
 
 inline uintptr_t GetOffset(const uintptr_t Address)
@@ -270,66 +275,68 @@ inline uintptr_t GetOffset(const void* Address)
 
 inline bool IsInAnyModules(const uintptr_t Address)
 {
-	PEB* Peb = GetPEB();
-	PEB_LDR_DATA* Ldr = Peb->Ldr;
+    for (uint32_t i = 0; i < _dyld_image_count(); ++i)
+    {
+        const mach_header* header = _dyld_get_image_header(i);
+        uintptr_t base = reinterpret_cast<uintptr_t>(header) + _dyld_get_image_vmaddr_slide(i);
 
-	int NumEntriesLeft = Ldr->Length;
+        const load_command* cmd = reinterpret_cast<const load_command*>(header + 1);
+        uintptr_t maxAddr = base;
 
-	for (LIST_ENTRY* P = Ldr->InMemoryOrderModuleList.Flink; P && NumEntriesLeft-- > 0; P = P->Flink)
-	{
-		LDR_DATA_TABLE_ENTRY* Entry = reinterpret_cast<LDR_DATA_TABLE_ENTRY*>(P);
+        for (uint32_t j = 0; j < header->ncmds; ++j)
+        {
+            if (cmd->cmd == LC_SEGMENT_64)
+            {
+                auto seg = reinterpret_cast<const segment_command_64*>(cmd);
+                uintptr_t end = base + seg->vmaddr + seg->vmsize;
+                if (Address >= (base + seg->vmaddr) && Address < end)
+                    return true;
 
-		if (reinterpret_cast<void*>(Address) > Entry->DllBase && reinterpret_cast<void*>(Address) < ((PCHAR)Entry->DllBase + Entry->SizeOfImage))
-			return true;
-	}
-
-	return false;
+                if (end > maxAddr)
+                    maxAddr = end;
+            }
+            cmd = reinterpret_cast<const load_command*>((uintptr_t)cmd + cmd->cmdsize);
+        }
+    }
+    return false;
 }
 
-// The processor (x86-64) only translates 52bits (or 57 bits) of a virtual address into a physical address and the unused bits need to be all 0 or all 1.
-inline bool IsValidVirtualAddress(const uintptr_t Address)
-{
-	constexpr uint64_t BitMask = 0b1111'1111ull << 56;
-
-	return (Address & BitMask) == BitMask || (Address & BitMask) == 0x0;
-}
-
-inline bool IsInProcessRange(const uintptr_t Address)
-{
-	const auto [ImageBase, ImageSize] = GetImageBaseAndSize();
-
-	if (Address >= ImageBase && Address < (ImageBase + ImageSize))
-		return true;
-
-	return IsInAnyModules(Address);
-}
-
-inline bool IsInProcessRange(const void* Address)
-{
-	return IsInProcessRange(reinterpret_cast<const uintptr_t>(Address));
-}
 inline bool IsBadReadPtr(const void* Ptr)
 {
-	if(!IsValidVirtualAddress(reinterpret_cast<const uintptr_t>(Ptr)))
-		return true;
-
-	MEMORY_BASIC_INFORMATION Mbi;
-
-	if (VirtualQuery(Ptr, &Mbi, sizeof(Mbi)))
-	{
-		constexpr DWORD AccessibleMask = (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY);
-		constexpr DWORD InaccessibleMask = (PAGE_GUARD | PAGE_NOACCESS);
-
-		return !(Mbi.Protect & AccessibleMask) || (Mbi.Protect & InaccessibleMask);
-	}
-
-	return true;
+    uint8_t Data = 0;
+    size_t Size = 0;
+    
+    kern_return_t KR = vm_read_overwrite(mach_task_self(), (vm_address_t)Ptr, 1, (vm_address_t)&Data, &Size);
+    return (KR == KERN_INVALID_ADDRESS ||
+            KR == KERN_MEMORY_FAILURE  ||
+            KR == KERN_MEMORY_ERROR    ||
+            KR == KERN_PROTECTION_FAILURE);
 };
 
 inline bool IsBadReadPtr(const uintptr_t Ptr)
 {
-	return IsBadReadPtr(reinterpret_cast<const void*>(Ptr));
+    return IsBadReadPtr(reinterpret_cast<const void*>(Ptr));
 }
+
+inline bool IsValidVirtualAddress(const uintptr_t Address)
+{
+    return !IsBadReadPtr(Address);
+}
+
+inline bool IsInProcessRange(const uintptr_t Address)
+{
+    const auto [Base, Size] = GetImageBaseAndSize();
+    if (Address >= Base && Address < (Base + Size))
+        return true;
+
+    return IsInAnyModules(Address);
+}
+
+inline bool IsInProcessRange(const void* Address)
+{
+    return IsInProcessRange(reinterpret_cast<const uintptr_t>(Address));
+}
+
 
 inline void* GetModuleAddress(const char* SearchModuleName)
 {

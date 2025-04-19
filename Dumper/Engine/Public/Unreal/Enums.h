@@ -15,7 +15,7 @@
 #ifdef UEVERSION > 421
 
     #define TEXT(x) u##x
-    typedef char16_t TChar;
+    typedef char16_t TCHAR;
 
     using UnrealString = std::u16string;
 
@@ -29,7 +29,7 @@
 #else
     #define TEXT(x) L##x
 
-    typedef wchar_t TChar;
+    typedef wchar_t TCHAR;
 
     using UnrealString = std::wstring;
 

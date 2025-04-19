@@ -312,7 +312,7 @@ namespace UC
 		template<typename T> friend Iterators::TArrayIterator<T> end  (const TArray& Array);
 	};
 
-	class FString : public TArray<TChar>
+	class FString : public TArray<TCHAR>
 	{
 	public:
 		friend std::ostream& operator<<(std::ostream& Stream, const UC::FString& Str) { return Stream << Str.ToString(); }
@@ -320,11 +320,11 @@ namespace UC
 	public:
 		using TArray::TArray;
 
-        FString(const TChar* Str)
+        FString(const TCHAR* Str)
 		{
-			const uint32 NullTerminatedLength = static_cast<uint32>(std::char_traits<TChar>::length(Str) + 0x1);
+			const uint32 NullTerminatedLength = static_cast<uint32>(std::char_traits<TCHAR>::length(Str) + 0x1);
 
-			Data = const_cast<TChar*>(Str);
+			Data = const_cast<TCHAR*>(Str);
 			NumElements = NullTerminatedLength;
 			MaxElements = NullTerminatedLength;
 		}
@@ -355,11 +355,11 @@ namespace UC
 		}
 
 	public:
-		inline       TChar* CStr()       { return Data; }
-		inline const TChar* CStr() const { return Data; }
+		inline       TCHAR* CStr()       { return Data; }
+		inline const TCHAR* CStr() const { return Data; }
 
 	public:
-        inline bool operator==(const FString& Other) const { return Other ? NumElements == Other.NumElements && std::char_traits<TChar>::compare(Data, Other.Data, NumElements) == 0 : false; }
+        inline bool operator==(const FString& Other) const { return Other ? NumElements == Other.NumElements && std::char_traits<TCHAR>::compare(Data, Other.Data, NumElements) == 0 : false; }
 		inline bool operator!=(const FString& Other) const { return !(*this == Other); }
 	};
 
@@ -411,7 +411,7 @@ namespace UC
 	public:
 		FAllocatedString(int32 Size)
 		{
-			Data = static_cast<TChar*>(malloc(Size * sizeof(TChar)));
+			Data = static_cast<TCHAR*>(malloc(Size * sizeof(TCHAR)));
 			NumElements = 0x0;
 			MaxElements = Size;
 		}

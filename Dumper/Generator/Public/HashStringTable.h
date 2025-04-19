@@ -88,7 +88,7 @@ private:
     {
         // NOT null-terminated
         char Char[MaxStringLength];
-        TChar WChar[MaxStringLength];
+        TCHAR WChar[MaxStringLength];
     };
 
 private:
@@ -108,7 +108,7 @@ public:
     inline std::string GetName() const { return std::string(Char, GetStringLength()); }
     inline UnrealString GetWideName() const { return UnrealString(WChar, GetStringLength()); }
     inline std::string_view GetNameView() const { return std::string_view(Char, GetStringLength()); }
-    inline std::basic_string_view<TChar> GetWideNameView() const { return std::basic_string_view<TChar>(WChar, GetStringLength()); }
+    inline std::basic_string_view<TCHAR> GetWideNameView() const { return std::basic_string_view<TCHAR>(WChar, GetStringLength()); }
 };
 #pragma pack(pop)
 

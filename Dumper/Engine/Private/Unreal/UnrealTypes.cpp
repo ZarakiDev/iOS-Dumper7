@@ -9,7 +9,7 @@
 
 std::string MakeNameValid(UnrealString&& Name)
 {
-	static constexpr const TChar* Numbers[10] =
+	static constexpr const TCHAR* Numbers[10] =
 	{
 		TEXT("Zero"),
         TEXT("One"),
