@@ -3,6 +3,7 @@
 #include <fstream>
 #include <format>
 #include <filesystem>
+#include <unistd.h>
 
 #include "Unreal/ObjectArray.h"
 #include "OffsetFinder/Offsets.h"
@@ -217,11 +218,11 @@ void ObjectArray::Init(bool bScanAllMemory, const char* const ModuleName)
 	const auto [ImageBase, ImageSize] = GetImageBaseAndSize(ModuleName);
 
 	uintptr_t SearchBase = ImageBase;
-	DWORD SearchRange = ImageSize;
+	uintptr_t SearchRange = ImageSize;
 
 	if (!bScanAllMemory)
 	{
-		const auto [DataSection, DataSize] = GetSectionByName(ImageBase, ".data");
+		const auto [DataSection, DataSize] = GetSectionByName("__TEXT", "__data", ModuleName);
 
 		if (DataSection != 0x0 && DataSize != 0x0)
 		{
@@ -339,7 +340,7 @@ void ObjectArray::Init(bool bScanAllMemory, const char* const ModuleName)
 	if (GObjects == nullptr)
 	{
 		std::cout << "\nGObjects couldn't be found!\n\n\n";
-		Sleep(3000);
+        sleep(3);
 		exit(1);
 	}
 }
@@ -460,7 +461,7 @@ int32 ObjectArray::Num()
 }
 
 template<typename UEType>
-static UEType ObjectArray::GetByIndex(int32 Index)
+UEType ObjectArray::GetByIndex(int32 Index)
 {
 	return UEType(ByIndex(GObjects + Off::FUObjectArray::GetObjectsOffset(), Index, SizeOfFUObjectItem, FUObjectItemInitialOffset, NumElementsPerChunk));
 }
@@ -496,7 +497,7 @@ UEType ObjectArray::FindObjectFast(const std::string& Name, EClassCastFlags Requ
 }
 
 template<typename UEType>
-static UEType ObjectArray::FindObjectFastInOuter(const std::string& Name, std::string Outer)
+UEType ObjectArray::FindObjectFastInOuter(const std::string& Name, std::string Outer)
 {
 	auto ObjArray = ObjectArray();
 
