@@ -201,10 +201,13 @@ inline std::pair<uintptr_t, uintptr_t> GetImageBaseAndSize(const char* const Mod
         if (!ModuleName || strstr(name, ModuleName))
         {
             const mach_header* header = _dyld_get_image_header(i);
-            uintptr_t base = reinterpret_cast<uintptr_t>(header) + _dyld_get_image_vmaddr_slide(i);
-            
+            // Why add the header and vmaddr_slide if the header already contains the
+            // aslr offset?
+            // uintptr_t base = reinterpret_cast<uintptr_t>(header) + _dyld_get_image_vmaddr_slide(i);
+            uintptr_t base = reinterpret_cast<uintptr_t>(header);
             const load_command* cmd = reinterpret_cast<const load_command*>(header + 1);
-            uintptr_t max_addr = base;
+            // uintptr_t max_addr = base; // this seems confusing
+            uintptr_t max_addr = 0;
 
             for (uint32_t j = 0; j < header->ncmds; ++j)
             {
@@ -213,7 +216,7 @@ inline std::pair<uintptr_t, uintptr_t> GetImageBaseAndSize(const char* const Mod
                     auto seg = reinterpret_cast<const segment_command_64*>(cmd);
                     uintptr_t end = base + seg->vmaddr + seg->vmsize;
                     if (end > max_addr)
-                        max_addr = end;
+                        max_addr = end; // re-assign value
                 }
                 cmd = reinterpret_cast<const load_command*>((uintptr_t)cmd + cmd->cmdsize);
             }
@@ -340,10 +343,10 @@ inline bool IsInProcessRange(const void* Address)
 
 inline void* GetModuleAddress(const char* SearchModuleName)
 {
-	LDR_DATA_TABLE_ENTRY* Entry = GetModuleLdrTableEntry(SearchModuleName);
+	void* Entry = (void*)GetModuleBase(SearchModuleName);
 
 	if (Entry)
-		return Entry->DllBase;
+        return Entry; // _dyld_get_image_header
 
 	return nullptr;
 }
