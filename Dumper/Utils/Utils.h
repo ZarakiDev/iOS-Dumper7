@@ -340,10 +340,10 @@ inline bool IsInProcessRange(const void* Address)
 
 inline void* GetModuleAddress(const char* SearchModuleName)
 {
-	LDR_DATA_TABLE_ENTRY* Entry = GetModuleLdrTableEntry(SearchModuleName);
+	void* Entry = (void*)GetModuleBase(SearchModuleName);
 
 	if (Entry)
-		return Entry->DllBase;
+        return Entry; // _dyld_get_image_header
 
 	return nullptr;
 }
