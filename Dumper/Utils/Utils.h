@@ -8,6 +8,7 @@
 #include <mach/mach.h>
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
+#include <mach-o/getsect.h>
 
 /* Credits: https://en.cppreference.com/w/cpp/string/byte/tolower */
 inline std::string str_tolower(std::string S)
@@ -193,14 +194,14 @@ inline uintptr_t GetModuleBase(const char* const ModuleName = nullptr)
 }
 
 
-inline std::pair<uintptr_t, uintptr_t> GetImageBaseAndSize(const char* const ModuleName = nullptr)
+inline std::tuple<uintptr_t, uintptr_t, const struct mach_header_64*> GetImageBaseAndSize(const char* const ModuleName = nullptr)
 {
     for (uint32_t i = 0; i < _dyld_image_count(); ++i)
     {
         const char* name = _dyld_get_image_name(i);
         if (!ModuleName || strstr(name, ModuleName))
         {
-            const mach_header* header = _dyld_get_image_header(i);
+            const mach_header_64* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(i));
             // Why add the header and vmaddr_slide if the header already contains the
             // aslr offset?
             // uintptr_t base = reinterpret_cast<uintptr_t>(header) + _dyld_get_image_vmaddr_slide(i);
@@ -220,45 +221,19 @@ inline std::pair<uintptr_t, uintptr_t> GetImageBaseAndSize(const char* const Mod
                 }
                 cmd = reinterpret_cast<const load_command*>((uintptr_t)cmd + cmd->cmdsize);
             }
-            return { base, max_addr - base };
+            return { base, max_addr - base, header};
         }
     }
-    return { 0, 0 };
+    return { 0, 0 , nullptr};
 }
 
 
-std::pair<uintptr_t, size_t> GetSectionByName(const char* SegmentName, const char* SectionName, const char* ModuleName = nullptr)
+std::pair<uintptr_t, size_t> GetSectionByName(const struct mach_header_64* ImageBase, const char* SegmentName)
 {
-    for (uint32_t i = 0; i < _dyld_image_count(); ++i)
-    {
-        const char* name = _dyld_get_image_name(i);
-        if (!ModuleName || strstr(name, ModuleName))
-        {
-            const mach_header_64* header = (const mach_header_64*)_dyld_get_image_header(i);
-            uintptr_t slide = _dyld_get_image_vmaddr_slide(i);
-            const load_command* cmd = (const load_command*)(header + 1);
-
-            for (uint32_t j = 0; j < header->ncmds; ++j)
-            {
-                if (cmd->cmd == LC_SEGMENT_64)
-                {
-                    const segment_command_64* seg = (const segment_command_64*)cmd;
-                    if (strcmp(seg->segname, SegmentName) == 0)
-                    {
-                        const section_64* sec = (const section_64*)((uintptr_t)seg + sizeof(segment_command_64));
-                        for (uint32_t k = 0; k < seg->nsects; ++k)
-                        {
-                            if (strcmp(sec->sectname, SectionName) == 0)
-                                return { slide + sec->addr, sec->size };
-                            sec++;
-                        }
-                    }
-                }
-                cmd = (const load_command*)((uintptr_t)cmd + cmd->cmdsize);
-            }
-        }
-    }
-    return { 0, 0 };
+    unsigned long SegmentStart, SegmentSize = 0;
+    SegmentStart = (unsigned long)getsegmentdata(ImageBase, SegmentName, &SegmentSize);
+    
+    return {SegmentStart, SegmentStart};
 }
 
 inline uintptr_t GetOffset(const uintptr_t Address)
@@ -328,7 +303,7 @@ inline bool IsValidVirtualAddress(const uintptr_t Address)
 
 inline bool IsInProcessRange(const uintptr_t Address)
 {
-    const auto [Base, Size] = GetImageBaseAndSize();
+    const auto [Base, Size, Header] = GetImageBaseAndSize();
     if (Address >= Base && Address < (Base + Size))
         return true;
 
@@ -351,6 +326,7 @@ inline void* GetModuleAddress(const char* SearchModuleName)
 	return nullptr;
 }
 
+#if 0
 /* Gets the address at which a pointer to an imported function is stored */
 inline PIMAGE_THUNK_DATA GetImportAddress(uintptr_t ModuleBase, const char* ModuleToImportFrom, const char* SearchFunctionName)
 {
@@ -427,6 +403,7 @@ inline PIMAGE_THUNK_DATA GetImportAddress(const char* SearchModuleName, const ch
 	return GetImportAddress(SearchModule, ModuleToImportFrom, SearchFunctionName);
 }
 
+
 /* Finds the import for a funciton and returns the address of the function from the imported module */
 inline void* GetAddressOfImportedFunction(const char* SearchModuleName, const char* ModuleToImportFrom, const char* SearchFunctionName)
 {
@@ -493,6 +470,7 @@ inline void* GetExportAddress(const char* SearchModuleName, const char* SearchFu
 
 	return nullptr;
 }
+#endif
 
 inline void* FindPatternInRange(std::vector<int>&& Signature, const uint8_t* Start, uintptr_t Range, bool bRelative = false, uint32_t Offset = 0, int SkipCount = 0)
 {
@@ -563,14 +541,14 @@ inline void* FindPattern(const char* Signature, uint32_t Offset = 0, bool bSearc
 {
 	//std::cout << "StartAddr: " << StartAddress << "\n";
 
-	const auto [ImageBase, ImageSize] = GetImageBaseAndSize();
+	const auto [ImageBase, ImageSize, Header] = GetImageBaseAndSize();
 
 	uintptr_t SearchStart = ImageBase;
 	uintptr_t SearchRange = ImageSize;
 
 	if (!bSearchAllSections)
 	{
-		const auto [TextSection, TextSize] = GetSectionByName(ImageBase, ".text");
+		const auto [TextSection, TextSize] = GetSectionByName(Header, "__TEXT");
 
 		if (TextSection != 0x0 && TextSize != 0x0)
 		{
@@ -614,16 +592,16 @@ inline T* FindAlignedValueInProcessInRange(T Value, int32_t Alignment, uintptr_t
 }
 
 template<typename T>
-inline T* FindAlignedValueInProcess(T Value, const std::string& Sectionname = ".data", int32_t Alignment = alignof(T), bool bSearchAllSections = false)
+inline T* FindAlignedValueInProcess(T Value, const std::string& Sectionname = "__DATA", int32_t Alignment = alignof(T), bool bSearchAllSections = false)
 {
-	const auto [ImageBase, ImageSize] = GetImageBaseAndSize();
+	const auto [ImageBase, ImageSize, Header] = GetImageBaseAndSize();
 
 	uintptr_t SearchStart = ImageBase;
 	uintptr_t SearchRange = ImageSize;
 
 	if (!bSearchAllSections)
 	{
-		const auto [SectionStart, SectionSize] = GetSectionByName(ImageBase, Sectionname);
+        const auto [SectionStart, SectionSize] = GetSectionByName(Header, Sectionname.c_str());
 
 		if (SectionStart != 0x0 && SectionSize != 0x0)
 		{
@@ -794,7 +772,7 @@ public:
 	* If true: Returns resolved jump-target.
 	* If false: Returns current address.
 	*/
-	inline MemAddress ResolveJumpIfInstructionIsJump(MemAddress DefaultReturnValueOnFail = nullptr) const
+	/*inline MemAddress ResolveJumpIfInstructionIsJump(MemAddress DefaultReturnValueOnFail = nullptr) const
 	{
 		if (!ASMUtils::Is32BitRIPRelativeJump(Address))
 			return DefaultReturnValueOnFail;
@@ -805,7 +783,7 @@ public:
 			return DefaultReturnValueOnFail;
 
 		return TargetAddress;
-	}
+	}*/
 
 	/* Helper to find the end of a function based on 'pop' instructions followed by 'ret' */
 	inline MemAddress FindFunctionEnd(uint32_t Range = 0xFFFF) const
@@ -903,13 +881,13 @@ public:
 template<typename Type = const char*>
 inline MemAddress FindByString(Type RefStr)
 {
-	const auto [ImageBase, ImageSize] = GetImageBaseAndSize();
+	const auto [ImageBase, ImageSize, Header] = GetImageBaseAndSize();
 
 	uintptr_t SearchStart = ImageBase;
 	uintptr_t SearchRange = ImageSize;
 
-	const auto [RDataSection, RDataSize] = GetSectionByName(ImageBase, ".rdata");
-	const auto [TextSection, TextSize] = GetSectionByName(ImageBase, ".text");
+	const auto [RDataSection, RDataSize] = GetSectionByName(Header, "__cstring");
+	const auto [TextSection, TextSize] = GetSectionByName(Header, "__TEXT");
 	
 	if (!RDataSection || !TextSection)
 		return nullptr;
@@ -932,13 +910,12 @@ inline MemAddress FindByString(Type RefStr)
 
 	for (int i = 0; i < TextSize; i++)
 	{
-		// opcode: lea
-		const uint8_t CurrentByte = *reinterpret_cast<const uint8_t*>(TextSection + i);
-		const uint8_t NextByte    = *reinterpret_cast<const uint8_t*>(TextSection + i + 0x1);
+		// opcode: ADRL
+        uint32_t CurrentInst = *reinterpret_cast<uint32_t*>(TextSection + i);
 
-		if ((CurrentByte == 0x4C || CurrentByte == 0x48) && NextByte == 0x8D)
+        if (ASMUtils::IsADRL(&CurrentInst))
 		{
-			const uintptr_t StrPtr = ASMUtils::Resolve32BitRelativeLea(TextSection + i);
+            const uintptr_t StrPtr = ASMUtils::ResolveADRL(TextSection + i);
 
 			if (StrPtr == StringAddress)
 				return { TextSection + i };
@@ -962,7 +939,7 @@ inline MemAddress FindByStringInAllSections(const CharType* RefStr, uintptr_t St
 	/* Stop scanning when arriving 0x10 bytes before the end of the memory range */
 	constexpr int32_t OffsetFromMemoryEnd = 0x10;
 
-	const auto [ImageBase, ImageSize] = GetImageBaseAndSize();
+	const auto [ImageBase, ImageSize, Header] = GetImageBaseAndSize();
 
 	const uintptr_t ImageEnd = ImageBase + ImageSize;
 
@@ -971,11 +948,11 @@ inline MemAddress FindByStringInAllSections(const CharType* RefStr, uintptr_t St
 		return nullptr;
 
 	/* Add a few bytes to the StartAddress to prevent instantly returning the previous result */
-	uint8_t* SearchStart = StartAddress ? (reinterpret_cast<uint8_t*>(StartAddress) + 0x5) : reinterpret_cast<uint8_t*>(ImageBase);
-	DWORD SearchRange = StartAddress ? ImageEnd - StartAddress : ImageSize;
+	uint32_t* SearchStart = StartAddress ? (reinterpret_cast<uint32_t*>(StartAddress) + 0x8) : reinterpret_cast<uint32_t*>(ImageBase);
+	int32_t SearchRange = StartAddress ? ImageEnd - StartAddress : ImageSize;
 
 	if (Range != 0x0)
-		SearchRange = min(Range, SearchRange);
+		SearchRange = fmin(Range, SearchRange);
 
 	if ((StartAddress + SearchRange) >= ImageEnd)
 		SearchRange -= OffsetFromMemoryEnd;
@@ -985,9 +962,9 @@ inline MemAddress FindByStringInAllSections(const CharType* RefStr, uintptr_t St
 	for (uintptr_t i = 0; i < SearchRange; i++)
 	{
 		// opcode: lea
-		if ((SearchStart[i] == uint8_t(0x4C) || SearchStart[i] == uint8_t(0x48)) && SearchStart[i + 1] == uint8_t(0x8D))
+        if (ASMUtils::IsADRL(SearchStart + i))
 		{
-			const uintptr_t StrPtr = ASMUtils::Resolve32BitRelativeLea(reinterpret_cast<uintptr_t>(SearchStart + i));
+			const uintptr_t StrPtr = ASMUtils::ResolveADRL(reinterpret_cast<uintptr_t>(SearchStart + i));
 
 			if (!IsInProcessRange(StrPtr))
 				continue;
@@ -1014,10 +991,10 @@ inline MemAddress FindByStringInAllSections(const CharType* RefStr, uintptr_t St
 template<typename Type = const char*>
 inline MemAddress FindUnrealExecFunctionByString(Type RefStr, void* StartAddress = nullptr)
 {
-	const auto [ImageBase, ImageSize] = GetImageBaseAndSize();
+	const auto [ImageBase, ImageSize, Header] = GetImageBaseAndSize();
 
 	uint8_t* SearchStart = StartAddress ? reinterpret_cast<uint8_t*>(StartAddress) : reinterpret_cast<uint8_t*>(ImageBase);
-	DWORD SearchRange = ImageSize;
+	int32_t SearchRange = ImageSize;
 
 	const int32_t RefStrLen = StrlenHelper(RefStr);
 
@@ -1077,9 +1054,9 @@ inline MemAddress FindUnrealExecFunctionByString(Type RefStr, void* StartAddress
 
 /* Slower than FindByWString */
 template<bool bCheckIfLeaIsStrPtr = false>
-inline MemAddress FindByWStringInAllSections(const wchar_t* RefStr)
+inline MemAddress FindByWStringInAllSections(const char16_t* RefStr)
 {
-	return FindByStringInAllSections<bCheckIfLeaIsStrPtr, wchar_t>(RefStr);
+	return FindByStringInAllSections<bCheckIfLeaIsStrPtr, char16_t>(RefStr);
 }
 
 

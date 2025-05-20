@@ -4,8 +4,8 @@
 #include "Unreal/UnrealTypes.h"
 #include "Unreal/NameArray.h"
 
-#include "Encoding/UnicodeNames.h"
-
+#include "Utils/Encoding/UnicodeNames.h"
+#include "Utils/Encoding/UtfN.hpp"
 
 std::string MakeNameValid(UnrealString&& Name)
 {
@@ -38,7 +38,7 @@ std::string MakeNameValid(UnrealString&& Name)
 	std::u32string Strrr;
 	Strrr += UtfN::utf_cp32_t{ 200 };
 
-	std::u32string Utf32Name = UtfN::Utf16StringToUtf32String<std::u32string>(Name);
+    std::u32string Utf32Name = UtfN::Utf16StringToUtf32String<std::u32string>(Name);
 
 	bool bIsFirstIteration = true;
 	for (auto It = UtfN::utf32_iterator<std::u32string::iterator>(Utf32Name); It; ++It)
@@ -86,7 +86,7 @@ void FName::Init(bool bForceGNames)
 		i++;
 	}
 
-	Off::InSDK::Name::AppendNameToString = AppendString && !bForceGNames ? GetOffset(AppendString) : 0x0;
+	Off::InSDK::Name::AppendNameToString = AppendString && !bForceGNames ? GetOffset((void*)AppendString) : 0x0;
 
 	if (!AppendString || bForceGNames)
 	{
@@ -150,7 +150,7 @@ void FName::Init(int32 OverrideOffset, EOffsetOverrideType OverrideType, bool bI
 					const uint32 Number = FName(Name).GetNumber();
 
 					if (Number > 0)
-						return NameArray::GetNameEntry(Name).GetWString() + L'_' + ToUEString(Number - 1);
+						return NameArray::GetNameEntry(Name).GetWString() + TEXT('_') + ToUEString(Number - 1);
 				}
 
 				return NameArray::GetNameEntry(Name).GetWString();
@@ -201,7 +201,7 @@ void FName::InitFallback()
 		i++;
 	}
 
-	Off::InSDK::Name::AppendNameToString = AppendString ? GetOffset(AppendString) : 0x0;
+	Off::InSDK::Name::AppendNameToString = AppendString ? GetOffset((void*)AppendString) : 0x0;
 }
 
 

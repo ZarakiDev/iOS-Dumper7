@@ -14,13 +14,13 @@ namespace EnumInitHelper
 			Size = 0x8;
 		}
 		else if (EnumValue > GetMaxOfType<uint16>()) {
-			Size = max(Size, 0x4);
+			Size = fmax(Size, 0x4);
 		}
 		else if (EnumValue > GetMaxOfType<uint8>()) {
-			Size = max(Size, 0x2);
+			Size = fmax(Size, 0x2);
 		}
 		else {
-			Size = max(Size, 0x1);
+			Size = fmax(Size, 0x1);
 		}
 	}
 }
@@ -150,7 +150,7 @@ void EnumManager::InitInternal()
 				UnrealString NameWitPrefix = Name.ToWString();
 
 				if (!NameWitPrefix.ends_with(TEXT("_MAX")))
-					EnumMaxValue = max(EnumMaxValue, Value);
+					EnumMaxValue = fmax(EnumMaxValue, Value);
 
 				auto [NameIndex, bWasInserted] = UniqueEnumValueNames.FindOrAdd(MakeNameValid(NameWitPrefix.substr(NameWitPrefix.find_last_of(TEXT("::")) + 1)));
 

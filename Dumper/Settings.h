@@ -4,6 +4,37 @@
 
 #include "Unreal/Enums.h"
 
+#define UEVERSION 426
+
+
+#if UEVERSION >= 421
+
+    #define TEXT(x) u##x
+    typedef char16_t TCHAR;
+
+    using UnrealString = std::u16string;
+
+    template<typename T>
+    inline UnrealString ToUEString(T IntType)
+    {
+        std::string Str = std::to_string(IntType);
+        return std::u16string(Str.begin(), Str.end());
+    }
+
+#else
+    #define TEXT(x) L##x
+
+    typedef wchar_t TCHAR;
+
+    using UnrealString = std::wstring;
+
+    template<typename T>
+    inline UnrealString ToUEString(T IntType)
+    {
+        return std::to_wstring(IntType);
+    }
+
+#endif
 
 namespace Settings
 {
@@ -19,7 +50,7 @@ namespace Settings
 		inline std::string GameName = "";
 		inline std::string GameVersion = "";
 
-		inline constexpr const char* SDKGenerationPath = "Dumper-7";
+        inline const char* SDKGenerationPath = getenv("HOME");
 	}
 
 	namespace CppGenerator

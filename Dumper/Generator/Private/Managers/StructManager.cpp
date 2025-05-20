@@ -2,6 +2,7 @@
 #include "Unreal/ObjectArray.h"
 #include "Managers/StructManager.h"
 
+#include <thread>
 
 StructInfoHandle::StructInfoHandle(const StructInfo& InInfo)
 	: Info(&InInfo)
@@ -105,7 +106,7 @@ void StructManager::InitAlignmentsAndNames()
 		else
 		{
 			NewOrExistingInfo.bUseExplicitAlignment = MinAlignment > HighestMemberAlignment;
-			NewOrExistingInfo.Alignment = max(MinAlignment, HighestMemberAlignment);
+			NewOrExistingInfo.Alignment = fmax(MinAlignment, HighestMemberAlignment);
 		}
 	}
 
@@ -204,7 +205,7 @@ void StructManager::InitSizesAndIsFinal()
 			if (It == StructInfoOverrides.end())
 			{
 				std::cout << "\n\n\nDumper-7: Error, struct wasn't found in 'StructInfoOverrides'! Exiting...\n\n\n" << std::endl;
-				Sleep(10000);
+				std::this_thread::sleep_for(std::chrono::seconds(10000));
 				exit(1);
 			}
 

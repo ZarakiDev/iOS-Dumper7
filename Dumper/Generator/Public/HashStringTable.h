@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "Unreal/Enums.h"
+#include "Settings.h"
 
 
 #define WINDOWS_IGNORE_PACKING_MISMATCH

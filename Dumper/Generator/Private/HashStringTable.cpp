@@ -77,7 +77,7 @@ void HashStringTable::ResizeBucket(StringBucket& Bucket)
 template<typename CharType>
 std::pair<HashStringTableIndex, bool> HashStringTable::AddUnchecked(const CharType* Str, int32 Length, uint8 Hash)
 {
-    static_assert(std::is_same_v<CharType, char> || std::is_same_v<CharType, wchar_t>, "Invalid CharType! Type must be 'char' or 'wchar_t'.");
+    static_assert(std::is_same_v<CharType, char> || std::is_same_v<CharType, TCHAR>, "Invalid CharType! Type must be 'char' or 'wchar_t'.");
 
     const int32 LengthBytes = Length * sizeof(CharType);
 

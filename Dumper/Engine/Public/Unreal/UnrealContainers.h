@@ -4,8 +4,8 @@
 #include <stdexcept>
 
 #include "Enums.h"
-#include "Encoding/UtfN.hpp"
-
+//#include "Encoding/UtfN.hpp"
+#include "Settings.h"
 
 namespace UC
 {
@@ -334,14 +334,13 @@ namespace UC
 		{
 			if (*this)
 			{
-                if constexpr (std::is_same_v<ArrayElementType, wchar_t>)
-                {
-                    std::wstring Str(Data);
-                    return std::string(Str.begin(), Str.end());
-                } else {
-                    std::u16string Str(Data);
-                    return std::string(Str.begin(), Str.end());
-                }
+#if UEVERSION >= 421
+                std::u16string Str(Data);
+                return std::string(Str.begin(), Str.end());
+#else
+                std::wstring Str(Data);
+                return std::string(Str.begin(), Str.end());
+#endif
 			}
 			return "";
 		}

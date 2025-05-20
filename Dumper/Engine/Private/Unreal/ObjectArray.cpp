@@ -215,14 +215,14 @@ void ObjectArray::Init(bool bScanAllMemory, const char* const ModuleName)
 	if (!bScanAllMemory)
 		std::cout << "\nDumper-7 by me, you & him\n\n\n";
 
-	const auto [ImageBase, ImageSize] = GetImageBaseAndSize(ModuleName);
+	const auto [ImageBase, ImageSize, Header] = GetImageBaseAndSize(ModuleName);
 
 	uintptr_t SearchBase = ImageBase;
 	uintptr_t SearchRange = ImageSize;
 
 	if (!bScanAllMemory)
 	{
-		const auto [DataSection, DataSize] = GetSectionByName("__TEXT", "__data", ModuleName);
+		const auto [DataSection, DataSize] = GetSectionByName(Header, "__TEXT");
 
 		if (DataSection != 0x0 && DataSize != 0x0)
 		{

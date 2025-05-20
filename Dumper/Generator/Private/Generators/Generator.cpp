@@ -121,7 +121,7 @@ bool Generator::SetupDumperFolder()
 
 		FileNameHelper::MakeValidFileName(FolderName);
 
-		DumperFolder = fs::path(Settings::Generator::SDKGenerationPath) / FolderName;
+		DumperFolder = fs::path(Settings::Generator::SDKGenerationPath) / "Documents" / FolderName;
 
 		if (fs::exists(DumperFolder))
 		{

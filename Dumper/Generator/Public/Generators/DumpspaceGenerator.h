@@ -9,7 +9,7 @@
 #include "Wrappers/StructWrapper.h"
 #include "Wrappers/MemberWrappers.h"
 
-#include "Dumpspace/DSGen.h"
+#include "Utils/Dumpspace/DSGen.h"
 
 
 class DumpspaceGenerator
